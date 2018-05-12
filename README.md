@@ -3,7 +3,7 @@
 
 
 
-This is a project to create MTProto Proxy
+This is a project to create MTProto Proxy for Telegram
 
 This library is coded with C# using .NET Core framework to target Windows and Linux operating systems.
 

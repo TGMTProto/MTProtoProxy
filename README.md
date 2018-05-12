@@ -14,6 +14,10 @@ This library is coded with C# using .NET Core framework to target Windows and Li
 * **High-performance**: processes a lot of connections
 * **Fully-asynchronous**: it runs asynchronously
 
+## Dependencies
+
+ PCLCrypto
+
 ## How to use
 
         static void Main(string[] args)
@@ -37,3 +41,7 @@ Create a .NETCore project and add the nuget package: `MTProtoProxy` or you can d
 ```
 $> Install-Package MTProtoProxy
 ```
+
+## License
+
+The source code is licensed under GPL v2. License is available [here](/LICENSE).

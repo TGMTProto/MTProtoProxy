@@ -22,7 +22,7 @@ This library is coded with C# using .NET Core framework to target Windows and Li
 
         static void Main(string[] args)
         {
-            var mtprotoProxy = new MTProtoProxyServer("secret", "port");
+            var mtprotoProxy = new MTProtoProxyServer("secret", port);
             mtprotoProxy.StartAsync();
             Console.ReadLine();
         }

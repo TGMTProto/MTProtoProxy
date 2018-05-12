@@ -16,7 +16,7 @@ This library is coded with C# using .NET Core framework to target Windows and Li
 
 ## Dependencies
 
- PCLCrypto
+ Library PCLCrypto
 
 ## How to use
 

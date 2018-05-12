@@ -13,3 +13,11 @@ This library is coded with C# using .NET Core framework to target Windows and Li
 * **Completely managed**: connections are fully managed
 * **High-performance**: processes a lot of connections
 * **Fully-asynchronous**: it runs asynchronously
+
+## How to install
+
+Create a .NETCore project and add the nuget package: `MTProtoProxy` or you can do it manually in you NuGet console package manager :
+
+```
+$> Install-Package MTProtoProxy
+```

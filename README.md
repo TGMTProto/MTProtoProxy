@@ -9,7 +9,7 @@ This library is coded with C# using .NET Core framework to target Windows and Li
 
 ## Features
 
-* **Easy to use**:You can easily use it
-* **Completely managed**:Connections are fully managed
-* **High-performance**:Processes a lot of connections
-* **Fully-asynchronous**:It runs asynchronously
+* **Easy to use**: you can easily use it
+* **Completely managed**: connections are fully managed
+* **High-performance**: processes a lot of connections
+* **Fully-asynchronous**: it runs asynchronously

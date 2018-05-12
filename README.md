@@ -14,6 +14,15 @@ This library is coded with C# using .NET Core framework to target Windows and Li
 * **High-performance**: processes a lot of connections
 * **Fully-asynchronous**: it runs asynchronously
 
+## How to use
+
+        static void Main(string[] args)
+        {
+            var mtproto = new MTProtoProxyServer("secret", "port");
+            mtproto.StartAsync();
+            Console.ReadLine();
+        }
+
 ## How to install
 
 Create a .NETCore project and add the nuget package: `MTProtoProxy` or you can do it manually in you NuGet console package manager :

@@ -18,9 +18,16 @@ This library is coded with C# using .NET Core framework to target Windows and Li
 
         static void Main(string[] args)
         {
-            var mtproto = new MTProtoProxyServer("secret", "port");
-            mtproto.StartAsync();
+            var mtprotoProxy = new MTProtoProxyServer("secret", "port");
+            mtprotoProxy.StartAsync();
             Console.ReadLine();
+        }
+        
+## How to generate random secret
+
+        public static string GenerateRandomSecret()
+        {
+            return Guid.NewGuid().ToString().Replace("-", "");
         }
 
 ## How to install

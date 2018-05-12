@@ -7,6 +7,8 @@ This is a project to create MTProto Proxy for Telegram
 
 This library is coded with C# using .NET Core framework to target Windows and Linux operating systems.
 
+built by Visual Studio 2017
+
 ## Features
 
 * **Easy to use**: you can easily use it

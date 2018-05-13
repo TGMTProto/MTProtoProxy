@@ -40,7 +40,7 @@ namespace MTProtoProxy
                     && val != 0x54534f50
                     && val != 0x20544547
                     && val != 0x4954504f
-                    && val != 0xeeeeeeee
+                    && val != 0x7fffffff
                     && val2 != 0x00000000)
                 {
                     buffer[56] = buffer[57] = buffer[58] = buffer[59] = 0xef;

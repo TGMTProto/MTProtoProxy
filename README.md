@@ -19,6 +19,7 @@ built by Visual Studio 2017
 ## Dependencies
 
  Library PCLCrypto
+ Library System.Threading.Tasks.Extensions
 
 ## How to use
 

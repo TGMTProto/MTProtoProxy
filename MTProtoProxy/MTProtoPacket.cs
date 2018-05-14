@@ -106,7 +106,7 @@ namespace MTProtoProxy
             }
             return bytes;
         }
-        public byte[] AESCTR128Encrypt(byte[] input, byte[] key, ref byte[] ivec, ref byte[] ecountBuf, ref uint num)
+        private byte[] AESCTR128Encrypt(byte[] input, byte[] key, ref byte[] ivec, ref byte[] ecountBuf, ref uint num)
         {
             var output = new byte[input.Length];
             uint number = num;
@@ -145,6 +145,17 @@ namespace MTProtoProxy
                 var initBufferObfuscated2 = GetInitBufferObfuscated2();
                 return socket.SendAsync(initBufferObfuscated2, 0, initBufferObfuscated2.Length);
             }
+        }
+        public void Clear()
+        {
+            _encryptKey = null;
+            _encryptIv = null;
+            _decryptKey = null;
+            _decryptIv = null;
+            _encryptCountBuf = null;
+            _encryptNum = 0;
+            _decryptCountBuf = null;
+            _decryptNum = 0;
         }
     }
 }

@@ -2,25 +2,25 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
-using System.Threading.Tasks;
 
 namespace MTProtoProxy
 {
-    public class MTProtoProxyServer : IDisposable
+    public class MTProtoProxyServer
     {
         public bool IsRunning { get; private set; }
         private readonly string _secret;
         private readonly int _port;
         private readonly List<string> _ipServersConfig = new List<string> { "149.154.175.50", "149.154.167.51", "149.154.175.100", "149.154.167.91", "149.154.171.5" };
         private Socket _listener;
-        private readonly List<Socket> _listSocket = new List<Socket>();
-        private bool _isDisposed;
+        private readonly List<MTPSocket> _mtpSockets = new List<MTPSocket>();
+        private bool _isClosed;
         public MTProtoProxyServer(string secret, int port)
         {
             _secret = secret;
             _port = port;
-            Console.WriteLine("MTProtoProxy Server By Telegram @MTProtoProxy v1.0.0");
+            Console.WriteLine("MTProtoProxy Server By Telegram @MTProtoProxy v1.0.1-alpha");
             Console.WriteLine("open source => https://github.com/TGMTProto/MTProtoProxy");
         }
         public IPAddress GetLocalIpAddress()
@@ -37,66 +37,62 @@ namespace MTProtoProxy
         }
         public async void StartAsync()
         {
-            ThrowIfDisposed();
-            _listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            _listener.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, 1);
-            _listener.Bind(new IPEndPoint(GetLocalIpAddress(), _port));
-            _listener.Listen(100);
-            Console.WriteLine("Start listner with {0}:{1}", GetLocalIpAddress(), _port);
-            IsRunning = true;
-            while (IsRunning)
+            if (!_isClosed)
             {
-                ThrowIfDisposed();
-                var socket = await _listener.AcceptSocketAsync().ConfigureAwait(false);
-                StartSocketAsync(socket);
-                Console.WriteLine("Number of connections:{0}", Convert.ToInt32(_listSocket.Count));
-            }
-        }
-        public void Stop()
-        {
-            if (IsRunning)
-            {
-                IsRunning = false;
-                foreach (var socket in _listSocket)
-                {
-                    try
-                    {
-                        socket.Close();
-                    }
-                    catch(Exception e)
-                    {
-                        if (e.InnerException != null)
-                        {
-                            Console.WriteLine(e.InnerException.Message);
-                            return;
-                        }
-                        Console.WriteLine(e.Message);
-                    }
-                }
                 try
                 {
-                    _listener.Close();
+                    _listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                    _listener.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, 1);
+                    _listener.Bind(new IPEndPoint(GetLocalIpAddress(), _port));
+                    _listener.Listen(100);
+                    Console.WriteLine("Start listner with {0}:{1}", GetLocalIpAddress(), _port);
+                    IsRunning = true;
+                    while (IsRunning)
+                    {
+                        try
+                        {
+                            var socket = await _listener.AcceptSocketAsync().ConfigureAwait(false);
+                            StartSocketAsync(socket);
+                        }
+                        catch (Exception e)
+                        {
+                            if (e.InnerException != null)
+                            {
+                                Console.WriteLine(e.InnerException.Message);
+                            }
+                            else
+                            {
+                                Console.WriteLine(e.Message);
+                            }
+                        }
+                    }
                 }
-                catch(Exception e)
+                catch (Exception e)
                 {
                     if (e.InnerException != null)
                     {
                         Console.WriteLine(e.InnerException.Message);
-                        return;
                     }
-                    Console.WriteLine(e.Message);
+                    else
+                    {
+                        Console.WriteLine(e.Message);
+                    }
+                    StartAsync();
                 }
-                _listSocket.Clear();
             }
         }
         private async void StartSocketAsync(Socket socket)
         {
             try
             {
-                _listSocket.Add(socket);
                 var randomBuffer = new byte[64];
-                await socket.ReceiveAsync(randomBuffer, 0, randomBuffer.Length).ConfigureAwait(false);
-
+                var resultRandom = await socket.ReceiveAsync(randomBuffer, 0, randomBuffer.Length).ConfigureAwait(false);
+                if (resultRandom != 64)
+                {
+                    socket.Close();
+                    socket = null;
+                    return;
+                }
                 var reversed = randomBuffer.SubArray(8, 48).Reverse().ToArray();
                 var key = randomBuffer.SubArray(8, 32);
                 var keyReversed = reversed.SubArray(0, 32);
@@ -125,54 +121,15 @@ namespace MTProtoProxy
                 Console.WriteLine("Create new connection with dataCenterId:{0}", dcId);
                 var ip = _ipServersConfig[dcId - 1];
 
-                Socket socketClient = null;
-                MTProtoPacket mtprotoPacketClient = null;
-                object lockSend = new object();
-                while (socket.IsConnected())
-                {
-                    ThrowIfDisposed();
-                    var packetBytes = await GetPacketBytesAsync(socket, mtprotoPacketServer).ConfigureAwait(false);
-                    if (packetBytes == null)
-                    {
-                        continue;
-                    }
-                    if (socketClient == null || !socketClient.Connected)
-                    {
-                        socketClient = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                        socketClient.Connect(ip, 443);
-                        _listSocket.Add(socketClient);
-                        mtprotoPacketClient = new MTProtoPacket();
-                        await mtprotoPacketClient.SendInitBufferObfuscated2Async(socketClient).ConfigureAwait(false);
-                        SenderSocketAsync(socketClient, socket, mtprotoPacketClient, mtprotoPacketServer);
-                    }
-
-                    var packet = mtprotoPacketClient.CreatePacketObfuscated2(packetBytes);
-
-                    lock (lockSend)
-                    {
-                        socketClient.SendAsync(packet, 0, packet.Length).GetAwaiter().GetResult();
-                    }
-                }
-                if (socketClient != null)
-                {
-                    socketClient.Close();
-                    _listSocket.Remove(socketClient);
-                }
-                Console.WriteLine("A connection was closed");
-            }
-            catch (Exception e)
-            {
-                if (e.InnerException != null)
-                {
-                    Console.WriteLine(e.InnerException.Message);
-                    return;
-                }
-                Console.WriteLine(e.Message);
-            }
-            try
-            {
-                socket.Close();
-                _listSocket.Remove(socket);
+                var socketClient = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                await socketClient.ConnectAsync(new IPEndPoint(IPAddress.Parse(ip), 443)).ConfigureAwait(false);
+                var mtprotoPacketClient = new MTProtoPacket();
+                await mtprotoPacketClient.SendInitBufferObfuscated2Async(socketClient).ConfigureAwait(false);
+                var mtpSocket = new MTPSocket(socketClient, socket, mtprotoPacketClient, mtprotoPacketServer);
+                mtpSocket.Disconnected += MTPSocketDisconnected;
+                mtpSocket.Start();
+                _mtpSockets.Add(mtpSocket);
+                Console.WriteLine("Number of connections:{0}", _mtpSockets.Count);
             }
             catch (Exception e)
             {
@@ -184,20 +141,13 @@ namespace MTProtoProxy
                 Console.WriteLine(e.Message);
             }
         }
-        private async void SenderSocketAsync(Socket socketClient, Socket socketServer, MTProtoPacket mtprotoPacketClient, MTProtoPacket mtprotoPacketServer)
+        private void MTPSocketDisconnected(object sender, EventArgs ev)
         {
             try
             {
-                while (true)
-                {
-                    var packetBytesClient = await GetPacketBytesAsync(socketClient, mtprotoPacketClient).ConfigureAwait(false);
-                    if (packetBytesClient == null)
-                    {
-                        return;
-                    }
-                    var packetEnc = mtprotoPacketServer.CreatePacketObfuscated2(packetBytesClient);
-                    await socketServer.SendAsync(packetEnc, 0, packetEnc.Length).ConfigureAwait(false);
-                }
+                var mtpSocket = (MTPSocket)sender;
+                mtpSocket.Dispose();
+                _mtpSockets.Remove(mtpSocket);
             }
             catch (Exception e)
             {
@@ -209,87 +159,29 @@ namespace MTProtoProxy
                 Console.WriteLine(e.Message);
             }
         }
-        private async Task<bool> ReceiveAsync(byte[] buffer, Socket socket)
+        public void Close()
         {
-            var failedcomplete = false;
-
-            var bytesRead = 0;
-            do
+            try
             {
-                var result = await socket.ReceiveAsync(buffer, bytesRead, buffer.Length - bytesRead)
-                    .ConfigureAwait(false);
-                if (result == 0)
+                foreach (var mtpSocket in _mtpSockets)
                 {
-                    failedcomplete = true;
-                    break;
+                    mtpSocket.Dispose();
                 }
-                bytesRead += result;
-
-            } while (bytesRead != buffer.Length);
-
-            return failedcomplete;
-        }
-        private async Task<byte[]> GetPacketBytesAsync(Socket socket, MTProtoPacket mtprotoPacket)
-        {
-            var packetLengthBytes = new byte[1];
-            var resultPacketLength = await ReceiveAsync(packetLengthBytes, socket).ConfigureAwait(false);
-            if (resultPacketLength)
-            {
-                return null;
+                IsRunning = false;
+                _listener.Dispose();
             }
-            packetLengthBytes = mtprotoPacket.DecryptObfuscated2(packetLengthBytes);
-
-            var packetLength = BitConverter.ToInt32(packetLengthBytes.Concat(new byte[] { 0x00, 0x00, 0x00 }).ToArray(), 0);
-
-            int lengthBytes;
-            if (packetLength < 0x7F)
+            catch (Exception e)
             {
-                lengthBytes = packetLength << 2;
-            }
-            else
-            {
-                var lenBytes = new byte[3];
-                var resultLengthBytes = ReceiveAsync(lenBytes, socket).Result;
-                if (resultLengthBytes)
+                if (e.InnerException != null)
                 {
-                    return null;
+                    Console.WriteLine(e.InnerException.Message);
                 }
-                lenBytes = mtprotoPacket.DecryptObfuscated2(lenBytes);
-                lengthBytes = BitConverter.ToInt32(lenBytes.Concat(new byte[] { 0x00 }).ToArray(), 0) << 2;
+                else
+                {
+                    Console.WriteLine(e.Message);
+                }
             }
-            var packetBytes = new byte[lengthBytes];
-            var resultpacket = ReceiveAsync(packetBytes, socket).Result;
-            if (resultpacket)
-            {
-                return null;
-            }
-            packetBytes = mtprotoPacket.DecryptObfuscated2(packetBytes);
-            return packetBytes;
-        }
-        protected virtual void Dispose(bool disposing)
-        {
-            if (_isDisposed)
-            {
-                return;
-            }
-            _isDisposed = true;
-            if (!disposing)
-            {
-                Stop();
-            }
-            _listener = null;
-        }
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-        private void ThrowIfDisposed()
-        {
-            if (_isDisposed)
-            {
-                throw new ObjectDisposedException("MTProtoProxyServer was disposed.");
-            }
+            _isClosed = true;
         }
     }
 }

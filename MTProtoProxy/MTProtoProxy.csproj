@@ -1,11 +1,21 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <Description>This is a library to create MTProto Proxy for Telegram</Description>
+    <RepositoryUrl>https://github.com/TGMTProto/MTProtoProxy</RepositoryUrl>
+    <Copyright>Copyright © 2018 @MTProtoProxy</Copyright>
+    <PackageIconUrl>https://avatars1.githubusercontent.com/u/39196811?s=200&amp;v=4</PackageIconUrl>
+    <PackageProjectUrl>https://github.com/TGMTProto/MTProtoProxy</PackageProjectUrl>
+    <PackageLicenseUrl>https://github.com/TGMTProto/MTProtoProxy/blob/master/LICENSE</PackageLicenseUrl>
+    <PackageTags>Telegram MTProto MTProtoProxy Proxy TelegramProxy</PackageTags>
+    <Version>1.0.1-alpha</Version>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="PCLCrypto" Version="2.0.147" />
+    <PackageReference Include="System.Threading.Tasks.Extensions" Version="4.4.0" />
   </ItemGroup>
 
 </Project>

@@ -2,186 +2,236 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
-using System.Net.Http;
 using System.Net.Sockets;
 
 namespace MTProtoProxy
 {
-    public class MTProtoProxyServer
+    public class MTProtoProxyServer : IDisposable
     {
-        public bool IsRunning { get; private set; }
+        public string Secret { get => _secret; }
+        public int Port { get => _port; }
+        public bool IsClosed { get => _isDisposed; }
         private readonly string _secret;
         private readonly int _port;
-        private readonly List<string> _ipServersConfig = new List<string> { "149.154.175.50", "149.154.167.51", "149.154.175.100", "149.154.167.91", "149.154.171.5" };
-        private Socket _listener;
-        private readonly List<MTPSocket> _mtpSockets = new List<MTPSocket>();
-        private bool _isClosed;
-        public MTProtoProxyServer(string secret, int port)
+        private readonly MTPListener _mtplistener;
+        private readonly Random _random = new Random();
+        private readonly object _lockDic = new object();
+        private static readonly List<string> _ipServers = new List<string> { "149.154.175.50", "149.154.167.51", "149.154.175.100", "149.154.167.91", "149.154.171.5" };
+        private static readonly List<string> _ipServersConfig = new List<string> { "149.154.175.50", "149.154.167.50", "149.154.175.100", "91.108.4.204", "91.108.56.161" };
+        private readonly Dictionary<long, MTPClient> _mtpClientDictionary = new Dictionary<long, MTPClient>();
+        private readonly Dictionary<long, MTPSocket> _mtpSocketDictionary = new Dictionary<long, MTPSocket>();
+        private volatile bool _isDisposed;
+        public MTProtoProxyServer(string secret, int port, string ip = "default")
         {
             _secret = secret;
             _port = port;
-            Console.WriteLine("MTProtoProxy Server By Telegram @MTProtoProxy v1.0.1-alpha");
+            _mtplistener = new MTPListener(ip, port);
+            _mtplistener.SocketAccepted += MTPListenerSocketAccepted;
+            _mtplistener.ListenEnded += MTPListenerListenEnded;
+            Console.WriteLine("MTProtoProxy Server By Telegram @MTProtoProxy v1.0.2-alpha");
             Console.WriteLine("open source => https://github.com/TGMTProto/MTProtoProxy");
         }
-        public IPAddress GetLocalIpAddress()
+        public void Start(int backLog = 100)
         {
-            var host = Dns.GetHostEntry(Dns.GetHostName());
-            foreach (var ip in host.AddressList)
+            ThrowIfDisposed();
+            MemoryManager.Start();
+            _mtplistener.Start(backLog);
+
+        }
+        private void MTPListenerListenEnded(object sender, EventArgs e)
+        {
+            var mtpListener = (MTPListener)sender;
+            mtpListener.Dispose();
+            Dispose();
+        }
+        private void MTPListenerSocketAccepted(object sender, Socket e)
+        {
+            var sessionId = GenerateSessionId();
+            var buffer = new byte[64];
+            var result = e.Receive(buffer);
+            if (result == 64)
             {
-                if (ip.AddressFamily == AddressFamily.InterNetwork)
+                var mtpClient = new MTPClient(e, sessionId);
+                mtpClient.PacketReceived += MTPClientPacketReceived;
+                mtpClient.ReceiverEnded += MTPClientReceiverEnded;
+                mtpClient.Start(buffer, _secret);
+                lock (_lockDic)
                 {
-                    return ip;
+                    _mtpClientDictionary.Add(sessionId, mtpClient);
                 }
             }
-            throw new Exception("No network adapters with an IPv4 address in the system!");
-        }
-        public async void StartAsync()
-        {
-            if (!_isClosed)
+            else
             {
-                try
-                {
-                    _listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                    _listener.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, 1);
-                    _listener.Bind(new IPEndPoint(GetLocalIpAddress(), _port));
-                    _listener.Listen(100);
-                    Console.WriteLine("Start listner with {0}:{1}", GetLocalIpAddress(), _port);
-                    IsRunning = true;
-                    while (IsRunning)
-                    {
-                        try
-                        {
-                            var socket = await _listener.AcceptSocketAsync().ConfigureAwait(false);
-                            StartSocketAsync(socket);
-                        }
-                        catch (Exception e)
-                        {
-                            if (e.InnerException != null)
-                            {
-                                Console.WriteLine(e.InnerException.Message);
-                            }
-                            else
-                            {
-                                Console.WriteLine(e.Message);
-                            }
-                        }
-                    }
-                }
-                catch (Exception e)
-                {
-                    if (e.InnerException != null)
-                    {
-                        Console.WriteLine(e.InnerException.Message);
-                    }
-                    else
-                    {
-                        Console.WriteLine(e.Message);
-                    }
-                    StartAsync();
-                }
+                buffer = null;
+                e.Dispose();
+                e = null;
+            }
+            lock (_lockDic)
+            {
+                var endPointsCount = _mtpClientDictionary.Select(x => x.Value.IPEndPoint.Address).Distinct().Count();
+                Console.WriteLine("Number of users(Ips):{0}", endPointsCount);
+                Console.WriteLine("Number of connections:{0}", _mtpClientDictionary.Count());
             }
         }
-        private async void StartSocketAsync(Socket socket)
+        private void MTPClientReceiverEnded(object sender, EventArgs e)
+        {
+            var mtpClient = (MTPClient)sender;
+            MTPSocket mtpSocket = null;
+            lock (_lockDic)
+            {
+                if (_mtpSocketDictionary.ContainsKey(mtpClient.SessionId))
+                {
+                    mtpSocket = _mtpSocketDictionary[mtpClient.SessionId];
+                    _mtpSocketDictionary.Remove(mtpClient.SessionId);
+                }
+                if (_mtpClientDictionary.ContainsKey(mtpClient.SessionId))
+                {
+                    _mtpClientDictionary.Remove(mtpClient.SessionId);
+                }
+            }
+            if (mtpSocket != null)
+            {
+                mtpSocket.Dispose();
+            }
+            mtpClient.Dispose();
+            Console.WriteLine("A connection was closed");
+        }
+        private async void MTPClientPacketReceived(object sender, Tuple<byte[], int> e)
         {
             try
             {
-                var randomBuffer = new byte[64];
-                var resultRandom = await socket.ReceiveAsync(randomBuffer, 0, randomBuffer.Length).ConfigureAwait(false);
-                if (resultRandom != 64)
+                var mtpClient = (MTPClient)sender;
+                MTPSocket mtpSocket = null;
+                lock (_lockDic)
                 {
-                    socket.Close();
-                    socket = null;
-                    return;
+                    mtpSocket = _mtpSocketDictionary.FirstOrDefault(x => x.Value.SessionId == mtpClient.SessionId).Value;
                 }
-                var reversed = randomBuffer.SubArray(8, 48).Reverse().ToArray();
-                var key = randomBuffer.SubArray(8, 32);
-                var keyReversed = reversed.SubArray(0, 32);
-                var binSecret = ArrayUtils.HexToByteArray(_secret);
-                key = SHA256Helper.ComputeHashsum(key.Concat(binSecret).ToArray());
-                keyReversed = SHA256Helper.ComputeHashsum(keyReversed.Concat(binSecret).ToArray());
-
-                var mtprotoPacketServer = new MTProtoPacket();
-                mtprotoPacketServer.SetInitBufferObfuscated2(randomBuffer, reversed, key, keyReversed);
-                byte[] decryptBuf = mtprotoPacketServer.DecryptObfuscated2(randomBuffer).SubArray(56, 8);
-                for (int i = 56; i < 64; i++)
+                if (mtpSocket == null)
                 {
-                    randomBuffer[i] = decryptBuf[i - 56];
-                }
-                byte[] res = randomBuffer.SubArray(56, 4);
-                for (int i = 0; i < 4; i++)
-                {
-                    if (res[i] != 0xef)
+                    mtpSocket = new MTPSocket(new IPEndPoint(IPAddress.Parse(_ipServersConfig[e.Item2 - 1]), 443), mtpClient.SessionId);
+                    mtpSocket.PacketReceived += MTPSocketPacketReceived;
+                    mtpSocket.ReceiverEnded += MTPSocketReceiverEnded;
+                    if (!mtpSocket.Connect())
                     {
-                        Console.WriteLine("Error in buffer");
-                        return;
+                        mtpSocket.Dispose();
+                        mtpSocket = new MTPSocket(new IPEndPoint(IPAddress.Parse(_ipServers[e.Item2 - 1]), 443), mtpClient.SessionId);
+                        mtpSocket.PacketReceived += MTPSocketPacketReceived;
+                        mtpSocket.ReceiverEnded += MTPSocketReceiverEnded;
+                        if (!mtpSocket.Connect())
+                        {
+                            mtpSocket.Dispose();
+                            lock (_lockDic)
+                            {
+                                _mtpClientDictionary.Remove(mtpClient.SessionId);
+                            }
+                            return;
+                        }
+                    }
+                    Console.WriteLine("Create new connection with dataCenterId:{0}", e.Item2);
+                    lock (_lockDic)
+                    {
+                        _mtpSocketDictionary.Add(mtpClient.SessionId, mtpSocket);
                     }
                 }
-
-                var dcId = Math.Abs(BitConverter.ToInt16(randomBuffer.SubArray(60, 2), 0));
-                Console.WriteLine("Create new connection with dataCenterId:{0}", dcId);
-                var ip = _ipServersConfig[dcId - 1];
-
-                var socketClient = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                await socketClient.ConnectAsync(new IPEndPoint(IPAddress.Parse(ip), 443)).ConfigureAwait(false);
-                var mtprotoPacketClient = new MTProtoPacket();
-                await mtprotoPacketClient.SendInitBufferObfuscated2Async(socketClient).ConfigureAwait(false);
-                var mtpSocket = new MTPSocket(socketClient, socket, mtprotoPacketClient, mtprotoPacketServer);
-                mtpSocket.Disconnected += MTPSocketDisconnected;
-                mtpSocket.Start();
-                _mtpSockets.Add(mtpSocket);
-                Console.WriteLine("Number of connections:{0}", _mtpSockets.Count);
-            }
-            catch (Exception e)
-            {
-                if (e.InnerException != null)
+                if (!mtpSocket.IsClosed)
                 {
-                    Console.WriteLine(e.InnerException.Message);
-                    return;
+                    await mtpSocket.SendAsync(e.Item1).ConfigureAwait(false);
                 }
-                Console.WriteLine(e.Message);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex);
             }
         }
-        private void MTPSocketDisconnected(object sender, EventArgs ev)
+        private void MTPSocketReceiverEnded(object sender, EventArgs e)
+        {
+            var mtpSocket = (MTPSocket)sender;
+            MTPClient mtpClient = null;
+            lock (_lockDic)
+            {
+                if (_mtpClientDictionary.ContainsKey(mtpSocket.SessionId))
+                {
+                    mtpClient = _mtpClientDictionary[mtpSocket.SessionId];
+                    _mtpClientDictionary.Remove(mtpSocket.SessionId);
+                }
+                if (_mtpSocketDictionary.ContainsKey(mtpSocket.SessionId))
+                {
+                    _mtpSocketDictionary.Remove(mtpSocket.SessionId);
+                }
+            }
+            if (mtpClient != null)
+            {
+                mtpClient.Dispose();
+            }
+            mtpSocket.Dispose();
+            Console.WriteLine("A connection was closed");
+        }
+        private async void MTPSocketPacketReceived(object sender, byte[] e)
         {
             try
             {
                 var mtpSocket = (MTPSocket)sender;
-                mtpSocket.Dispose();
-                _mtpSockets.Remove(mtpSocket);
-            }
-            catch (Exception e)
-            {
-                if (e.InnerException != null)
+                MTPClient mtpClient = null;
+                lock (_lockDic)
                 {
-                    Console.WriteLine(e.InnerException.Message);
-                    return;
+                    if (_mtpClientDictionary.ContainsKey(mtpSocket.SessionId))
+                    {
+                        mtpClient = _mtpClientDictionary[mtpSocket.SessionId];
+                    }
                 }
-                Console.WriteLine(e.Message);
+                if (mtpClient != null && !mtpClient.IsClosed)
+                {
+                    await mtpClient.SendAsync(e).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex);
             }
         }
-        public void Close()
+        private long GenerateSessionId()
         {
-            try
+            var randomlong = (Convert.ToInt64(_random.Next()) << 32) | Convert.ToInt64(_random.Next());
+            return randomlong;
+        }
+        private void ThrowIfDisposed()
+        {
+            if (_isDisposed)
             {
-                foreach (var mtpSocket in _mtpSockets)
-                {
-                    mtpSocket.Dispose();
-                }
-                IsRunning = false;
-                _listener.Dispose();
+                throw new ObjectDisposedException("Connection was disposed.");
             }
-            catch (Exception e)
+        }
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+        protected virtual void Dispose(bool isDisposing)
+        {
+            if (_isDisposed)
             {
-                if (e.InnerException != null)
-                {
-                    Console.WriteLine(e.InnerException.Message);
-                }
-                else
-                {
-                    Console.WriteLine(e.Message);
-                }
+                return;
             }
-            _isClosed = true;
+            _isDisposed = true;
+
+            if (!isDisposing)
+            {
+                return;
+            }
+            lock (_lockDic)
+            {
+                foreach (var mtpClient in _mtpClientDictionary)
+                {
+                    mtpClient.Value.Dispose();
+                }
+                foreach (var mtpSocket in _mtpSocketDictionary)
+                {
+                    mtpSocket.Value.Dispose();
+                }
+                _mtpClientDictionary.Clear();
+                _mtpSocketDictionary.Clear();
+            }
+            MemoryManager.Stop();
         }
     }
 }

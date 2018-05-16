@@ -1,9 +1,7 @@
 ﻿using PCLCrypto;
 using System;
 using System.Linq;
-using System.Net.Sockets;
 using System.Numerics;
-using System.Threading.Tasks;
 
 namespace MTProtoProxy
 {
@@ -17,13 +15,19 @@ namespace MTProtoProxy
         private uint _encryptNum;
         private byte[] _decryptCountBuf;
         private uint _decryptNum;
-        private readonly object _object = new object();
-        public void SetInitBufferObfuscated2(byte[] buffer, byte[] reversed, byte[] key, byte[] keyRev)
+        public void SetInitBufferObfuscated2(byte[] randomBuffer, string secret)
         {
-            _encryptKey = keyRev;
+            var reversed = randomBuffer.SubArray(8, 48).Reverse().ToArray();
+            var key = randomBuffer.SubArray(8, 32);
+            var keyReversed = reversed.SubArray(0, 32);
+            var binSecret = ArrayUtils.HexToByteArray(secret);
+            key = SHA256Helper.ComputeHashsum(key.Concat(binSecret).ToArray());
+            keyReversed = SHA256Helper.ComputeHashsum(keyReversed.Concat(binSecret).ToArray());
+
+            _encryptKey = keyReversed;
             _encryptIv = reversed.SubArray(32, 16);
             _decryptKey = key;
-            _decryptIv = buffer.SubArray(40, 16);
+            _decryptIv = randomBuffer.SubArray(40, 16);
         }
         public byte[] GetInitBufferObfuscated2()
         {
@@ -70,7 +74,7 @@ namespace MTProtoProxy
                 _encryptCountBuf = new byte[16];
                 _encryptNum = 0;
             }
-            return AESCTR128Encrypt(data, _encryptKey, ref _encryptIv, ref _encryptCountBuf, ref _encryptNum);
+            return AesCtr128Encrypt(data, _encryptKey, ref _encryptIv, ref _encryptCountBuf, ref _encryptNum);
         }
         public byte[] DecryptObfuscated2(byte[] data)
         {
@@ -79,16 +83,13 @@ namespace MTProtoProxy
                 _decryptCountBuf = new byte[16];
                 _decryptNum = 0;
             }
-            return AESCTR128Encrypt(data, _decryptKey, ref _decryptIv, ref _decryptCountBuf, ref _decryptNum);
+            return AesCtr128Encrypt(data, _decryptKey, ref _decryptIv, ref _decryptCountBuf, ref _decryptNum);
         }
         public byte[] CreatePacketObfuscated2(byte[] payLoad)
         {
-            lock (_object)
-            {
-                var packet = CreatePacketAbridged(payLoad);
-                packet = EncryptObfuscated2(packet);
-                return packet;
-            }
+            var packet = CreatePacketAbridged(payLoad);
+            packet = EncryptObfuscated2(packet);
+            return packet;
         }
         private byte[] CreatePacketAbridged(byte[] payLoad)
         {
@@ -106,12 +107,12 @@ namespace MTProtoProxy
             }
             return bytes;
         }
-        private byte[] AESCTR128Encrypt(byte[] input, byte[] key, ref byte[] ivec, ref byte[] ecountBuf, ref uint num)
+        private byte[] AesCtr128Encrypt(byte[] input, byte[] key, ref byte[] ivec, ref byte[] ecountBuf, ref uint num)
         {
             var output = new byte[input.Length];
             uint number = num;
 
-            var provider = WinRTCrypto.SymmetricKeyAlgorithmProvider.OpenAlgorithm(SymmetricAlgorithm.AesEcb);
+            var provider = WinRTCrypto.SymmetricKeyAlgorithmProvider.OpenAlgorithm(PCLCrypto.SymmetricAlgorithm.AesEcb);
             var keySymmetric = provider.CreateSymmetricKey(key);
 
             for (uint i = 0; i < input.Length; i++)
@@ -135,16 +136,6 @@ namespace MTProtoProxy
             }
             num = number;
             return output;
-        }
-        public Task SendInitBufferObfuscated2Async(Socket socket)
-        {
-            lock (_object)
-            {
-                _encryptCountBuf = null;
-                _decryptCountBuf = null;
-                var initBufferObfuscated2 = GetInitBufferObfuscated2();
-                return socket.SendAsync(initBufferObfuscated2, 0, initBufferObfuscated2.Length);
-            }
         }
         public void Clear()
         {

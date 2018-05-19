@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -16,30 +15,30 @@ namespace MTProtoProxy
         private readonly long _sessionId;
         private Socket _socket;
         private Thread _thread;
-        private readonly object _lockSend = new object();
-        private readonly object _lockStart = new object();
+        private readonly object _lockConnection = new object();
         private readonly MTProtoPacket _mtprotoPacket;
         private int _dcId;
         private volatile bool _isDisposed;
         public event EventHandler<Tuple<byte[], int>> PacketReceived;
         public event EventHandler ReceiverEnded;
-        public MTPClient(Socket socket, long sessionId)
+        public MTPClient(in Socket socket,in long sessionId)
         {
             _sessionId = sessionId;
             _socket = socket;
             _mtprotoPacket = new MTProtoPacket();
             _ipEndPoint = (IPEndPoint)_socket.RemoteEndPoint;
         }
-        public void Start(byte[] buffer, string secret)
+        public void Start(in byte[] buffer, in string secret)
         {
-            lock (_lockStart)
+            lock (_lockConnection)
             {
-                ThrowIfDisposed();
-                lock (_lockSend)
+                if (_isDisposed)
                 {
-                    _mtprotoPacket.Clear();
-                    _mtprotoPacket.SetInitBufferObfuscated2(buffer, secret);
+                    return;
                 }
+                _mtprotoPacket.Clear();
+                _mtprotoPacket.SetInitBufferObfuscated2(buffer, secret);
+
                 byte[] decryptBuf = _mtprotoPacket.DecryptObfuscated2(buffer).SubArray(56, 8);
                 for (int i = 56; i < 64; i++)
                 {
@@ -57,13 +56,18 @@ namespace MTProtoProxy
                 _dcId = Math.Abs(BitConverter.ToInt16(buffer.SubArray(60, 2), 0));
                 _thread = new Thread(async () => await StartReceiverAsync().ConfigureAwait(false));
                 _thread.Start();
+                Array.Clear(decryptBuf, 0, decryptBuf.Length);
+                Array.Clear(res, 0, res.Length);
             }
         }
-        public Task SendAsync(byte[] buffer)
+        public Task SendAsync(in byte[] buffer)
         {
-            lock (_lockSend)
+            lock (_lockConnection)
             {
-                ThrowIfDisposed();
+                if (_isDisposed)
+                {
+                    return null;
+                }
                 try
                 {
                     var packet = _mtprotoPacket.CreatePacketObfuscated2(buffer);
@@ -76,7 +80,7 @@ namespace MTProtoProxy
             }
             return null;
         }
-        private async Task<bool> ReceiveAsync(byte[] buffer)
+        private async ValueTask<bool> ReceiveAsync(byte[] buffer)
         {
             var failedcomplete = false;
 
@@ -95,9 +99,12 @@ namespace MTProtoProxy
 
             return failedcomplete;
         }
-        private async Task<byte[]> ReceiveAsync()
+        private async ValueTask<byte[]> ReceiveAsync()
         {
-            ThrowIfDisposed();
+            if (_isDisposed)
+            {
+                return null;
+            }
             var packetLengthBytes = new byte[1];
             var resultPacketLength = await ReceiveAsync(packetLengthBytes).ConfigureAwait(false);
             if (resultPacketLength)
@@ -106,7 +113,7 @@ namespace MTProtoProxy
             }
             packetLengthBytes = _mtprotoPacket.DecryptObfuscated2(packetLengthBytes);
 
-            var packetLength = BitConverter.ToInt32(packetLengthBytes.Concat(new byte[] { 0x00, 0x00, 0x00 }).ToArray(), 0);
+            var packetLength = BitConverter.ToInt32(ArrayUtils.Combine(packetLengthBytes, new byte[] { 0x00, 0x00, 0x00 }), 0);
 
             int lengthBytes;
             if (packetLength < 0x7F)
@@ -122,7 +129,8 @@ namespace MTProtoProxy
                     return null;
                 }
                 lenBytes = _mtprotoPacket.DecryptObfuscated2(lenBytes);
-                lengthBytes = BitConverter.ToInt32(lenBytes.Concat(new byte[] { 0x00 }).ToArray(), 0) << 2;
+                lengthBytes = BitConverter.ToInt32(ArrayUtils.Combine(lenBytes, new byte[] { 0x00 }), 0) << 2;
+                Array.Clear(lenBytes, 0, lenBytes.Length);
             }
             var packetBytes = new byte[lengthBytes];
             var resultpacket = await ReceiveAsync(packetBytes).ConfigureAwait(false);
@@ -130,6 +138,7 @@ namespace MTProtoProxy
             {
                 return null;
             }
+            Array.Clear(packetLengthBytes, 0, packetLengthBytes.Length);
             packetBytes = _mtprotoPacket.DecryptObfuscated2(packetBytes);
             return packetBytes;
         }
@@ -151,7 +160,6 @@ namespace MTProtoProxy
                     Console.WriteLine("Error receiving: " + e);
                     break;
                 }
-                Thread.Sleep(50);
             }
             ReceiverEnded.BeginInvoke(this, null, null, null);
         }
@@ -160,53 +168,50 @@ namespace MTProtoProxy
             Dispose(true);
             GC.SuppressFinalize(this);
         }
-        protected virtual void Dispose(bool isDisposing)
+        protected virtual void Dispose(in bool isDisposing)
         {
-            if (_isDisposed)
+            lock (_lockConnection)
             {
-                return;
-            }
-            _isDisposed = true;
+                if (_isDisposed)
+                {
+                    return;
+                }
+                _isDisposed = true;
 
-            if (!isDisposing)
-            {
-                return;
-            }
-            if (_thread != null)
-            {
-                try
+                if (!isDisposing)
                 {
-                    _thread.Abort();
+                    return;
                 }
-                catch (Exception e)
+                if (_thread != null)
                 {
-                    Console.WriteLine(e);
+                    try
+                    {
+                        _thread.Abort();
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine(e);
+                    }
+                    _thread = null;
                 }
-                _thread = null;
-            }
-            if (_socket != null)
-            {
-                try
+                if (_socket != null)
                 {
-                    _socket.Shutdown(SocketShutdown.Both);
-                    _socket.Disconnect(false);
-                    _socket.Dispose();
+                    try
+                    {
+                        _socket.Shutdown(SocketShutdown.Both);
+                        _socket.Disconnect(false);
+                        _socket.Dispose();
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine(e);
+                    }
+                    finally
+                    {
+                        _socket = null;
+                    }
                 }
-                catch (Exception e)
-                {
-                    Console.WriteLine(e);
-                }
-                finally
-                {
-                    _socket = null;
-                }
-            }
-        }
-        private void ThrowIfDisposed()
-        {
-            if (_isDisposed)
-            {
-                throw new ObjectDisposedException("Connection was disposed.");
+                _mtprotoPacket.Dispose();
             }
         }
     }

@@ -8,7 +8,6 @@ namespace MTProtoProxy
 {
     internal class MTPListener : IDisposable
     {
-        public string Secret { get; set; }
         public int Port { get; set; }
         public bool IsClosed { get => _isDisposed; }
         private Socket _socket;
@@ -18,14 +17,14 @@ namespace MTProtoProxy
         public event EventHandler<Socket> SocketAccepted;
         public event EventHandler ListenEnded;
         private volatile bool _isDisposed;
-        public MTPListener(string ip, int port)
+        public MTPListener(in string ip,in int port)
         {
             _ip = ip;
             _port = port;
             _socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             _socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, 1);
         }
-        public void Start(int backLog)
+        public void Start(in int backLog)
         {
             ThrowIfDisposed();
             IPAddress ipAddress = null;
@@ -72,7 +71,6 @@ namespace MTProtoProxy
                     Console.WriteLine("Error listen: " + e);
                     break;
                 }
-                Thread.Sleep(5);
             }
             ListenEnded?.BeginInvoke(this, null, null, null);
         }
@@ -81,7 +79,7 @@ namespace MTProtoProxy
             Dispose(true);
             GC.SuppressFinalize(this);
         }
-        protected virtual void Dispose(bool isDisposing)
+        protected virtual void Dispose(in bool isDisposing)
         {
             if (_isDisposed)
             {

@@ -4,7 +4,7 @@ namespace MTProtoProxy
 {
     internal static class SHA256Helper
     {
-        public static byte[] ComputeHashsum(byte[] data)
+        public static byte[] ComputeHashsum(in byte[] data)
         {
             using (var sha256 = new SHA256Managed())
             {

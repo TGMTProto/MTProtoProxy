@@ -10,12 +10,16 @@
     <PackageProjectUrl>https://github.com/TGMTProto/MTProtoProxy</PackageProjectUrl>
     <PackageLicenseUrl>https://github.com/TGMTProto/MTProtoProxy/blob/master/LICENSE</PackageLicenseUrl>
     <PackageTags>Telegram MTProto MTProtoProxy Proxy TelegramProxy</PackageTags>
-    <Version>1.0.2-alpha</Version>
+    <Version>1.0.3-alpha</Version>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
   <ItemGroup>
-    <PackageReference Include="PCLCrypto" Version="2.0.147" />
+    <PackageReference Include="System.Threading.Tasks.Extensions" Version="4.4.0" />
   </ItemGroup>
 
 </Project>

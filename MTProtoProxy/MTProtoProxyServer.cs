@@ -21,22 +21,20 @@ namespace MTProtoProxy
         private readonly Dictionary<long, MTPClient> _mtpClientDictionary = new Dictionary<long, MTPClient>();
         private readonly Dictionary<long, MTPSocket> _mtpSocketDictionary = new Dictionary<long, MTPSocket>();
         private volatile bool _isDisposed;
-        public MTProtoProxyServer(string secret, int port, string ip = "default")
+        public MTProtoProxyServer(in string secret, in int port, in string ip = "default")
         {
             _secret = secret;
             _port = port;
             _mtplistener = new MTPListener(ip, port);
             _mtplistener.SocketAccepted += MTPListenerSocketAccepted;
             _mtplistener.ListenEnded += MTPListenerListenEnded;
-            Console.WriteLine("MTProtoProxy Server By Telegram @MTProtoProxy v1.0.2-alpha");
+            Console.WriteLine("MTProtoProxy Server By Telegram @MTProtoProxy v1.0.3-alpha");
             Console.WriteLine("open source => https://github.com/TGMTProto/MTProtoProxy");
         }
-        public void Start(int backLog = 100)
+        public void Start(in int backLog = 100)
         {
             ThrowIfDisposed();
-            MemoryManager.Start();
             _mtplistener.Start(backLog);
-
         }
         private void MTPListenerListenEnded(object sender, EventArgs e)
         {
@@ -62,7 +60,6 @@ namespace MTProtoProxy
             }
             else
             {
-                buffer = null;
                 e.Dispose();
                 e = null;
             }
@@ -72,6 +69,7 @@ namespace MTProtoProxy
                 Console.WriteLine("Number of users(Ips):{0}", endPointsCount);
                 Console.WriteLine("Number of connections:{0}", _mtpClientDictionary.Count());
             }
+            Array.Clear(buffer, 0, buffer.Length);
         }
         private void MTPClientReceiverEnded(object sender, EventArgs e)
         {
@@ -96,7 +94,7 @@ namespace MTProtoProxy
             mtpClient.Dispose();
             Console.WriteLine("A connection was closed");
         }
-        private async void MTPClientPacketReceived(object sender, Tuple<byte[], int> e)
+        private async void MTPClientPacketReceived(object sender,Tuple<byte[], int> e)
         {
             try
             {
@@ -137,6 +135,8 @@ namespace MTProtoProxy
                 {
                     await mtpSocket.SendAsync(e.Item1).ConfigureAwait(false);
                 }
+                Array.Clear(e.Item1, 0, e.Item1.Length);
+                GC.Collect();
             }
             catch (Exception ex)
             {
@@ -182,6 +182,8 @@ namespace MTProtoProxy
                 if (mtpClient != null && !mtpClient.IsClosed)
                 {
                     await mtpClient.SendAsync(e).ConfigureAwait(false);
+                    Array.Clear(e, 0, e.Length);
+                    GC.Collect();
                 }
             }
             catch (Exception ex)
@@ -206,7 +208,7 @@ namespace MTProtoProxy
             Dispose(true);
             GC.SuppressFinalize(this);
         }
-        protected virtual void Dispose(bool isDisposing)
+        protected virtual void Dispose(in bool isDisposing)
         {
             if (_isDisposed)
             {
@@ -231,7 +233,7 @@ namespace MTProtoProxy
                 _mtpClientDictionary.Clear();
                 _mtpSocketDictionary.Clear();
             }
-            MemoryManager.Stop();
+            //MemoryManager.Stop();
         }
     }
 }

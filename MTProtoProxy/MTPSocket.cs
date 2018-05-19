@@ -1,11 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Numerics;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -21,14 +16,13 @@ namespace MTProtoProxy
         private Socket _socket;
         private readonly IPEndPoint _ipEndPoint;
         private Thread _thread;
-        private readonly object _lockSend = new object();
-        private readonly object _lockConnect = new object();
+        private readonly object _lockConnection = new object();
         private volatile bool _isConnected;
         private volatile bool _isDisposed;
         private readonly MTProtoPacket _mtprotoPacket;
         public event EventHandler<byte[]> PacketReceived;
         public event EventHandler ReceiverEnded;
-        public MTPSocket(IPEndPoint ipEndPoint, long sessionId)
+        public MTPSocket(in IPEndPoint ipEndPoint,in long sessionId)
         {
             _ipEndPoint = ipEndPoint;
             _sessionId = sessionId;
@@ -37,27 +31,25 @@ namespace MTProtoProxy
         }
         public bool Connect()
         {
-            lock (_lockConnect)
+            lock (_lockConnection)
             {
-                ThrowIfDisposed();
+                if (_isDisposed)
+                {
+                    return false;
+                }
                 if (!_isConnected)
                 {
                     try
-                    {
-                        var task = Task.Run(() => _socket.ConnectAsync(_ipEndPoint).GetAwaiter().GetResult());
-                        if (!task.Wait(2000))
-                        {
-                            return false;
-                        }
-                        lock (_lockSend)
-                        {
-                            _mtprotoPacket.Clear();
-                            var buffer = _mtprotoPacket.GetInitBufferObfuscated2();
-                            _socket.SendAsync(buffer, 0, buffer.Length).GetAwaiter().GetResult();
-                        }
+                    {                     
+                        _socket.ConnectAsync(_ipEndPoint).GetAwaiter().GetResult();
+                        _mtprotoPacket.Clear();
+                        var buffer = _mtprotoPacket.GetInitBufferObfuscated2();
+                        _socket.SendAsync(buffer, 0, buffer.Length).GetAwaiter().GetResult();
+
                         _thread = new Thread(async () => await StartReceiverAsync().ConfigureAwait(false));
                         _thread.Start();
                         _isConnected = true;
+                        Array.Clear(buffer, 0, buffer.Length);
                         return true;
                     }
                     catch (Exception e)
@@ -69,11 +61,14 @@ namespace MTProtoProxy
                 return true;
             }
         }
-        public Task SendAsync(byte[] buffer)
+        public Task SendAsync(in byte[] buffer)
         {
-            lock (_lockSend)
+            lock (_lockConnection)
             {
-                ThrowIfDisposed();
+                if (_isDisposed)
+                {
+                    return null;
+                }
                 if (_isConnected)
                 {
                     try
@@ -89,7 +84,7 @@ namespace MTProtoProxy
                 return null;
             }
         }
-        private async Task<bool> ReceiveAsync(byte[] buffer)
+        private async ValueTask<bool> ReceiveAsync(byte[] buffer)
         {
             var failedcomplete = false;
 
@@ -108,9 +103,12 @@ namespace MTProtoProxy
 
             return failedcomplete;
         }
-        private async Task<byte[]> ReceiveAsync()
+        private async ValueTask<byte[]> ReceiveAsync()
         {
-            ThrowIfDisposed();
+            if (_isDisposed)
+            {
+                return null;
+            }
             var packetLengthBytes = new byte[1];
             var resultPacketLength = await ReceiveAsync(packetLengthBytes).ConfigureAwait(false);
             if (resultPacketLength)
@@ -119,7 +117,7 @@ namespace MTProtoProxy
             }
             packetLengthBytes = _mtprotoPacket.DecryptObfuscated2(packetLengthBytes);
 
-            var packetLength = BitConverter.ToInt32(packetLengthBytes.Concat(new byte[] { 0x00, 0x00, 0x00 }).ToArray(), 0);
+            var packetLength = BitConverter.ToInt32(ArrayUtils.Combine(packetLengthBytes, new byte[] { 0x00, 0x00, 0x00 }), 0);
 
             int lengthBytes;
             if (packetLength < 0x7F)
@@ -135,7 +133,8 @@ namespace MTProtoProxy
                     return null;
                 }
                 lenBytes = _mtprotoPacket.DecryptObfuscated2(lenBytes);
-                lengthBytes = BitConverter.ToInt32(lenBytes.Concat(new byte[] { 0x00 }).ToArray(), 0) << 2;
+                lengthBytes = BitConverter.ToInt32(ArrayUtils.Combine(lenBytes, new byte[] { 0x00 }), 0) << 2;
+                Array.Clear(lenBytes, 0, lenBytes.Length);
             }
             var packetBytes = new byte[lengthBytes];
             var resultpacket = await ReceiveAsync(packetBytes).ConfigureAwait(false);
@@ -144,6 +143,7 @@ namespace MTProtoProxy
                 return null;
             }
             packetBytes = _mtprotoPacket.DecryptObfuscated2(packetBytes);
+            Array.Clear(packetLengthBytes, 0, packetLengthBytes.Length);
             return packetBytes;
         }
         private async Task StartReceiverAsync()
@@ -164,7 +164,6 @@ namespace MTProtoProxy
                     Console.WriteLine("Error receiving: " + e);
                     break;
                 }
-                Thread.Sleep(50);
             }
             ReceiverEnded.BeginInvoke(this, null, null, null);
         }
@@ -173,54 +172,51 @@ namespace MTProtoProxy
             Dispose(true);
             GC.SuppressFinalize(this);
         }
-        protected virtual void Dispose(bool isDisposing)
+        protected virtual void Dispose(in bool isDisposing)
         {
-            if (_isDisposed)
+            lock (_lockConnection)
             {
-                return;
-            }
-            _isDisposed = true;
+                if (_isDisposed)
+                {
+                    return;
+                }
+                _isDisposed = true;
 
-            if (!isDisposing)
-            {
-                return;
-            }
-            if (_thread != null)
-            {
-                try
+                if (!isDisposing)
                 {
-                    _thread.Abort();
+                    return;
                 }
-                catch (Exception e)
+                if (_thread != null)
                 {
-                    Console.WriteLine(e);
+                    try
+                    {
+                        _thread.Abort();
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine(e);
+                    }
+                    _thread = null;
                 }
-                _thread = null;
-            }
-            if (_socket != null)
-            {
-                try
+                if (_socket != null)
                 {
-                    _socket.Shutdown(SocketShutdown.Both);
-                    _socket.Disconnect(false);
-                    _socket.Dispose();
+                    try
+                    {
+                        _socket.Shutdown(SocketShutdown.Both);
+                        _socket.Disconnect(false);
+                        _socket.Dispose();
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine(e);
+                    }
+                    finally
+                    {
+                        _socket = null;
+                    }
                 }
-                catch (Exception e)
-                {
-                    Console.WriteLine(e);
-                }
-                finally
-                {
-                    _socket = null;
-                }
-            }
-            _isConnected = false;
-        }
-        private void ThrowIfDisposed()
-        {
-            if (_isDisposed)
-            {
-                throw new ObjectDisposedException("Connection was disposed.");
+                _isConnected = false;
+                _mtprotoPacket.Dispose();
             }
         }
     }

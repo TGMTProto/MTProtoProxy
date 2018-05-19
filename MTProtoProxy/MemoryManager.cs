@@ -1,17 +1,14 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace MTProtoProxy
 {
-    internal static class MemoryManager
+    public static class MemoryManager
     {
         private static Thread _thread;
+
         [DllImport("psapi.dll")]
         public static extern bool EmptyWorkingSet(IntPtr hProcess);
         public static void EmptyWorking()
@@ -27,7 +24,7 @@ namespace MTProtoProxy
                 {
                     //
                 }
-                Thread.Sleep(60 * 1000);
+                Thread.Sleep(5 * 60 * 1000);
             }
         }
         public static void Start()

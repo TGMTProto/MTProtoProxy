@@ -1,15 +1,19 @@
 ﻿using System;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace MTProtoProxy
 {
     internal static class SocketUtils
     {
-        public static Task ConnectAsync(this Socket socket, EndPoint endPoint)
+        public static Task ConnectAsync(this Socket socket, in EndPoint endPoint)
         {
             var connectSource = new TaskCompletionSource<bool>();
+            var cts = new CancellationTokenSource();
+            cts.Token.Register(() => connectSource.TrySetCanceled());
+            cts.CancelAfter(2000);
 
             void ConnectHandler(object sender, SocketAsyncEventArgs eventArgs)
             {
@@ -84,7 +88,7 @@ namespace MTProtoProxy
 
             return disconnectSource.Task;
         }
-        public static Task SendAsync(this Socket socket, byte[] buffer, int offset, int count)
+        public static Task SendAsync(this Socket socket, in byte[] buffer, in int offset, in int count)
         {
             var sendSource = new TaskCompletionSource<bool>();
 
@@ -115,7 +119,7 @@ namespace MTProtoProxy
 
             return sendSource.Task;
         }
-        public static Task<int> ReceiveAsync(this Socket socket, byte[] buffer, int offset, int count)
+        public static ValueTask<int> ReceiveAsync(this Socket socket, in byte[] buffer, in int offset, in int count)
         {
             var receiveSource = new TaskCompletionSource<int>();
 
@@ -143,9 +147,9 @@ namespace MTProtoProxy
                 receiveSource.SetException(ex);
             }
 
-            return receiveSource.Task;
+            return new ValueTask<int>(receiveSource.Task);
         }
-        public static Task<Socket> AcceptSocketAsync(this Socket socket)
+        public static ValueTask<Socket> AcceptSocketAsync(this Socket socket)
         {
             var acceptSource = new TaskCompletionSource<Socket>();
 
@@ -179,7 +183,7 @@ namespace MTProtoProxy
                 acceptSource.TrySetException(ex);
             }
 
-            return acceptSource.Task;
+            return new ValueTask<Socket>(acceptSource.Task);
         }
         public static bool IsConnected(this Socket socket)
         {

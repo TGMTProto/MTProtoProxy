@@ -8,7 +8,7 @@ namespace MTProtoProxy
         public static T[] SubArray<T>(this T[] data, int index, int length)
         {
             var result = new T[length];
-            Array.Copy(data, index, result, 0, length);
+            Buffer.BlockCopy(data, index, result, 0, length);
             return result;
         }
         public static byte[] Combine(params byte[][] arrays)

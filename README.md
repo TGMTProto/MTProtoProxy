@@ -18,7 +18,6 @@ built by Visual Studio 2017
 
 ## Dependencies
 
- Library PCLCrypto
  Library System.Threading.Tasks.Extensions
 
 ## How to use
@@ -26,7 +25,7 @@ built by Visual Studio 2017
         static void Main(string[] args)
         {
             var mtprotoProxy = new MTProtoProxyServer("secret", port);
-            mtprotoProxy.StartAsync();
+            mtprotoProxy.Start();
             Console.ReadLine();
         }
         

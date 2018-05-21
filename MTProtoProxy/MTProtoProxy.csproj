@@ -10,7 +10,7 @@
     <PackageProjectUrl>https://github.com/TGMTProto/MTProtoProxy</PackageProjectUrl>
     <PackageLicenseUrl>https://github.com/TGMTProto/MTProtoProxy/blob/master/LICENSE</PackageLicenseUrl>
     <PackageTags>Telegram MTProto MTProtoProxy Proxy TelegramProxy</PackageTags>
-    <Version>1.0.3-alpha</Version>
+    <Version>1.0.4-alpha</Version>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
   </PropertyGroup>
 

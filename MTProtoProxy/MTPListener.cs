@@ -13,16 +13,16 @@ namespace MTProtoProxy
         private Socket _socket;
         private readonly int _port;
         private readonly string _ip;
+        private readonly object _lockConnection = new object();
         private Thread _thread;
+        private volatile bool _isDisposed;
         public event EventHandler<Socket> SocketAccepted;
         public event EventHandler ListenEnded;
-        private volatile bool _isDisposed;
-        public MTPListener(in string ip,in int port)
+        public MTPListener(in string ip, in int port)
         {
             _ip = ip;
             _port = port;
-            _socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            _socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, 1);
+            _socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
         }
         public void Start(in int backLog)
         {
@@ -30,7 +30,7 @@ namespace MTProtoProxy
             IPAddress ipAddress = null;
             if (_ip == "default")
             {
-                ipAddress = GetLocalIpAddress();
+                ipAddress = IPAddress.Any;
             }
             else
             {
@@ -44,18 +44,6 @@ namespace MTProtoProxy
             _socket.Listen(backLog);
             _thread = new Thread(async () => await StartListenAsync().ConfigureAwait(false));
             _thread.Start();
-        }
-        public IPAddress GetLocalIpAddress()
-        {
-            var host = Dns.GetHostEntry(Dns.GetHostName());
-            foreach (var ip in host.AddressList)
-            {
-                if (ip.AddressFamily == AddressFamily.InterNetwork)
-                {
-                    return ip;
-                }
-            }
-            throw new Exception("No network adapters with an IPv4 address in the system!");
         }
         private async Task StartListenAsync()
         {
@@ -72,7 +60,13 @@ namespace MTProtoProxy
                     break;
                 }
             }
-            ListenEnded?.BeginInvoke(this, null, null, null);
+            lock (_lockConnection)
+            {
+                if (!_isDisposed)
+                {
+                    ListenEnded?.BeginInvoke(this, null, null, null);
+                }
+            }
         }
         public void Dispose()
         {
@@ -81,43 +75,46 @@ namespace MTProtoProxy
         }
         protected virtual void Dispose(in bool isDisposing)
         {
-            if (_isDisposed)
+            lock (_lockConnection)
             {
-                return;
-            }
-            _isDisposed = true;
+                if (_isDisposed)
+                {
+                    return;
+                }
+                _isDisposed = true;
 
-            if (!isDisposing)
-            {
-                return;
-            }
-            if (_thread != null)
-            {
-                try
+                if (!isDisposing)
                 {
-                    _thread.Abort();
+                    return;
                 }
-                catch (Exception e)
+                if (_thread != null)
                 {
-                    Console.WriteLine(e);
+                    try
+                    {
+                        _thread.Abort();
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine(e);
+                    }
+                    _thread = null;
                 }
-                _thread = null;
-            }
-            if (_socket != null)
-            {
-                try
+                if (_socket != null)
                 {
-                    _socket.Shutdown(SocketShutdown.Both);
-                    _socket.Disconnect(false);
-                    _socket.Dispose();
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine(e);
-                }
-                finally
-                {
-                    _socket = null;
+                    try
+                    {
+                        _socket.Shutdown(SocketShutdown.Both);
+                        _socket.Disconnect(false);
+                        _socket.Dispose();
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine(e);
+                    }
+                    finally
+                    {
+                        _socket = null;
+                    }
                 }
             }
         }

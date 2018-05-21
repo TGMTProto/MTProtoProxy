@@ -1,9 +1,16 @@
 ﻿using System;
+using System.IO;
 using System.Numerics;
 using System.Security.Cryptography;
 
 namespace MTProtoProxy
 {
+    internal enum ProtocolType
+    {
+        None = 0,
+        AbridgedObfuscated2 = 1,
+        IntermediateObfuscated2 = 2
+    }
     internal class MTProtoPacket : IDisposable
     {
         private byte[] _encryptKey;
@@ -14,8 +21,10 @@ namespace MTProtoProxy
         private uint _encryptNum;
         private byte[] _decryptCountBuf;
         private uint _decryptNum;
+        private ProtocolType _protocolType;
         private ICryptoTransform _cryptoTransformEncrypt;
         private ICryptoTransform _cryptoTransformDecrypt;
+        public ProtocolType ProtocolType { get => _protocolType; }
         public void SetInitBufferObfuscated2(in byte[] randomBuffer, in string secret)
         {
             var reversed = randomBuffer.SubArray(8, 48);
@@ -34,13 +43,36 @@ namespace MTProtoProxy
             _cryptoTransformEncrypt = AesHelper.CreateEncryptorFromAes(_encryptKey);
             _cryptoTransformDecrypt = AesHelper.CreateEncryptorFromAes(_decryptKey);
 
+            var decryptedBuffer = DecryptObfuscated2(randomBuffer);
+            for (var i = 56; i < decryptedBuffer.Length; i++)
+            {
+                randomBuffer[i] = decryptedBuffer[i];
+            }
+
+            byte[] protocolResult = randomBuffer.SubArray(56, 4);
+            if (protocolResult[0] == 0xef && protocolResult[1] == 0xef && protocolResult[2] == 0xef && protocolResult[3] == 0xef)
+            {
+                _protocolType = ProtocolType.AbridgedObfuscated2;
+            }
+            else if (protocolResult[0] == 0xee && protocolResult[1] == 0xee && protocolResult[2] == 0xee && protocolResult[3] == 0xee)
+            {
+                _protocolType = ProtocolType.IntermediateObfuscated2;
+            }
+            else
+            {
+                _protocolType = ProtocolType.None;
+            }
             Array.Clear(reversed, 0, reversed.Length);
             Array.Clear(key, 0, key.Length);
             Array.Clear(keyReversed, 0, keyReversed.Length);
             Array.Clear(binSecret, 0, binSecret.Length);
+            Array.Clear(decryptedBuffer, 0, decryptedBuffer.Length);
+            Array.Clear(protocolResult, 0, protocolResult.Length);
         }
-        public byte[] GetInitBufferObfuscated2()
+        public byte[] GetInitBufferObfuscated2(in ProtocolType protocolType)
         {
+            _protocolType = protocolType;
+
             var buffer = new byte[64];
             var random = new Random();
             while (true)
@@ -57,7 +89,17 @@ namespace MTProtoProxy
                     && val != 0xeeeeeeee
                     && val2 != 0x00000000)
                 {
-                    buffer[56] = buffer[57] = buffer[58] = buffer[59] = 0xef;
+                    switch (_protocolType)
+                    {
+                        case ProtocolType.AbridgedObfuscated2:
+                            buffer[56] = buffer[57] = buffer[58] = buffer[59] = 0xef;
+                            break;
+                        case ProtocolType.IntermediateObfuscated2:
+                            buffer[56] = buffer[57] = buffer[58] = buffer[59] = 0xee;
+                            break;
+                        case ProtocolType.None:
+                            return null;
+                    }
                     break;
                 }
             }
@@ -101,7 +143,16 @@ namespace MTProtoProxy
         }
         public byte[] CreatePacketObfuscated2(in byte[] payLoad)
         {
-            var packet = CreatePacketAbridged(payLoad);
+            byte[] packet = null;
+            switch (_protocolType)
+            {
+                case ProtocolType.AbridgedObfuscated2:
+                    packet = CreatePacketAbridged(payLoad);
+                    break;
+                case ProtocolType.IntermediateObfuscated2:
+                    packet = CreatePacketIntermediate(payLoad);
+                    break;
+            }
             return EncryptObfuscated2(packet);
         }
         private byte[] CreatePacketAbridged(in byte[] payLoad)
@@ -121,8 +172,25 @@ namespace MTProtoProxy
             }
             return bytes;
         }
+        private byte[] CreatePacketIntermediate(in byte[] payLoad)
+        {
+            using (var memoryStream = new MemoryStream())
+            {
+                using (var binaryWriter = new BinaryWriter(memoryStream))
+                {
+                    binaryWriter.Write(payLoad.Length);
+                    binaryWriter.Write(payLoad);
+                    return memoryStream.ToArray();
+                }
+            }
+        }
         private byte[] AesCtr128Encrypt(in byte[] input, ref byte[] ivec, ref byte[] ecountBuf, ref uint num)
         {
+            if (_encryptKey == null)
+            {
+                return null;
+            }
+
             var output = new byte[input.Length];
             uint number = num;
 
@@ -150,6 +218,11 @@ namespace MTProtoProxy
         }
         private byte[] AesCtr128Decrypt(in byte[] input, ref byte[] ivdc, ref byte[] dcountBuf, ref uint num)
         {
+            if (_decryptKey == null)
+            {
+                return null;
+            }
+
             var output = new byte[input.Length];
             uint number = num;
 

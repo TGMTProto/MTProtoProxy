@@ -24,7 +24,7 @@ namespace MTProtoProxy
                 {
                     //
                 }
-                Thread.Sleep(5 * 60 * 1000);
+                Thread.Sleep(10 * 60 * 1000);
             }
         }
         public static void Start()
@@ -48,6 +48,18 @@ namespace MTProtoProxy
             {
             }
             _thread = null;
+        }
+        public static void Collect()
+        {
+            try
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+            }
         }
     }
 }

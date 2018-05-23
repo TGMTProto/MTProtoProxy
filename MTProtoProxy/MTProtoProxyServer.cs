@@ -49,6 +49,7 @@ namespace MTProtoProxy
             var ipEndPoint = new IPEndPoint(ipAddress, _port);
             _socketListener.StartListen(ipEndPoint, _backLog);
             StartListener();
+            TgSockets.StartAsync();
         }
         private Task StartListener()
         {
@@ -173,6 +174,7 @@ namespace MTProtoProxy
                         }
                     }
                 }
+                TgSockets.Close();
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
             }

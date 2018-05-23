@@ -1,5 +1,4 @@
 ﻿using System;
-using System.IO;
 using System.Numerics;
 using System.Security.Cryptography;
 
@@ -25,6 +24,13 @@ namespace MTProtoProxy
         private ICryptoTransform _cryptoTransformEncrypt;
         private ICryptoTransform _cryptoTransformDecrypt;
         public ProtocolType ProtocolType { get => _protocolType; }
+        public MTProtoPacket()
+        {
+            _encryptCountBuf = new byte[16];
+            _decryptCountBuf = new byte[16];
+            _encryptNum = 0;
+            _decryptNum = 0;
+        }
         public void SetInitBufferObfuscated2(in byte[] randomBuffer, in string secret)
         {
             var reversed = randomBuffer.SubArray(8, 48);
@@ -43,7 +49,7 @@ namespace MTProtoProxy
             _cryptoTransformEncrypt = AesHelper.CreateEncryptorFromAes(_encryptKey);
             _cryptoTransformDecrypt = AesHelper.CreateEncryptorFromAes(_decryptKey);
 
-            var decryptedBuffer = DecryptObfuscated2(randomBuffer);
+            var decryptedBuffer = DecryptObfuscated2(randomBuffer, randomBuffer.Length);
             for (var i = 56; i < decryptedBuffer.Length; i++)
             {
                 randomBuffer[i] = decryptedBuffer[i];
@@ -74,10 +80,9 @@ namespace MTProtoProxy
             _protocolType = protocolType;
 
             var buffer = new byte[64];
-            var random = new Random();
             while (true)
             {
-                random.NextBytes(buffer);
+                ArrayUtils.GenerateRandomBytes(buffer);
 
                 var val = (buffer[3] << 24) | (buffer[2] << 16) | (buffer[1] << 8) | (buffer[0]);
                 var val2 = (buffer[7] << 24) | (buffer[6] << 16) | (buffer[5] << 8) | (buffer[4]);
@@ -86,7 +91,6 @@ namespace MTProtoProxy
                     && val != 0x54534f50
                     && val != 0x20544547
                     && val != 0x4954504f
-                    && val != 0xeeeeeeee
                     && val2 != 0x00000000)
                 {
                     switch (_protocolType)
@@ -114,7 +118,7 @@ namespace MTProtoProxy
             _cryptoTransformEncrypt = AesHelper.CreateEncryptorFromAes(_encryptKey);
             _cryptoTransformDecrypt = AesHelper.CreateEncryptorFromAes(_decryptKey);
 
-            var encryptedBuffer = EncryptObfuscated2(buffer);
+            var encryptedBuffer = EncryptObfuscated2(buffer, buffer.Length);
             for (var i = 56; i < encryptedBuffer.Length; i++)
             {
                 buffer[i] = encryptedBuffer[i];
@@ -123,129 +127,54 @@ namespace MTProtoProxy
             Array.Clear(encryptedBuffer, 0, encryptedBuffer.Length);
             return buffer;
         }
-        public byte[] EncryptObfuscated2(in byte[] data)
+        public byte[] EncryptObfuscated2(in byte[] data, in int length)
         {
-            if (_encryptCountBuf == null)
-            {
-                _encryptCountBuf = new byte[16];
-                _encryptNum = 0;
-            }
-            return AesCtr128Encrypt(data, ref _encryptIv, ref _encryptCountBuf, ref _encryptNum);
+            return AesCtr128Encrypt(data, length, ref _encryptIv, ref _encryptCountBuf, ref _encryptNum);
         }
-        public byte[] DecryptObfuscated2(in byte[] data)
+        public byte[] DecryptObfuscated2(in byte[] data, in int length)
         {
-            if (_decryptCountBuf == null)
-            {
-                _decryptCountBuf = new byte[16];
-                _decryptNum = 0;
-            }
-            return AesCtr128Decrypt(data, ref _decryptIv, ref _decryptCountBuf, ref _decryptNum);
+            return AesCtr128Decrypt(data, length, ref _decryptIv, ref _decryptCountBuf, ref _decryptNum);
         }
-        public byte[] CreatePacketObfuscated2(in byte[] payLoad)
+        private byte[] AesCtr128Encrypt(in byte[] buffer, in int length, ref byte[] ivec, ref byte[] ecountBuf, ref uint number)
         {
-            byte[] packet = null;
-            switch (_protocolType)
-            {
-                case ProtocolType.AbridgedObfuscated2:
-                    packet = CreatePacketAbridged(payLoad);
-                    break;
-                case ProtocolType.IntermediateObfuscated2:
-                    packet = CreatePacketIntermediate(payLoad);
-                    break;
-            }
-            return EncryptObfuscated2(packet);
-        }
-        private byte[] CreatePacketAbridged(in byte[] payLoad)
-        {
-            var length = payLoad.Length / 4;
-            byte[] bytes;
-            if (length < 0x7F)
-            {
-                bytes = ArrayUtils.Combine(new[] { (byte)length }, payLoad);
-            }
-            else
-            {
-                byte[] bytesLength = new byte[3];
-                Buffer.BlockCopy(BitConverter.GetBytes(length), 0, bytesLength, 0, 3);
-                bytes = ArrayUtils.Combine(new byte[] { 0x7F }, bytesLength, payLoad);
-                Array.Clear(bytesLength, 0, bytesLength.Length);
-            }
-            return bytes;
-        }
-        private byte[] CreatePacketIntermediate(in byte[] payLoad)
-        {
-            using (var memoryStream = new MemoryStream())
-            {
-                using (var binaryWriter = new BinaryWriter(memoryStream))
-                {
-                    binaryWriter.Write(payLoad.Length);
-                    binaryWriter.Write(payLoad);
-                    return memoryStream.ToArray();
-                }
-            }
-        }
-        private byte[] AesCtr128Encrypt(in byte[] input, ref byte[] ivec, ref byte[] ecountBuf, ref uint num)
-        {
-            if (_encryptKey == null)
-            {
-                return null;
-            }
-
-            var output = new byte[input.Length];
-            uint number = num;
-
-            for (uint i = 0; i < input.Length; i++)
+            var output = new byte[length];
+            for (int i = 0; i < length; i++)
             {
                 if (number == 0)
                 {
-                    var ecountBuffer = _cryptoTransformEncrypt.TransformFinalBlock(ivec, 0, ivec.Length);
-                    Buffer.BlockCopy(ecountBuffer, 0, ecountBuf, 0, ecountBuf.Length);
-                    Array.Clear(ecountBuffer, 0, ecountBuffer.Length);
+                    ecountBuf = _cryptoTransformEncrypt.TransformFinalBlock(ivec, 0, ivec.Length);
                     Array.Reverse(ivec);
                     var bigInteger = new BigInteger(ArrayUtils.Combine(ivec, new byte[] { 0x00 }));
                     bigInteger++;
                     var bigIntegerArray = bigInteger.ToByteArray();
-                    ivec = new byte[16];
                     Buffer.BlockCopy(bigIntegerArray, 0, ivec, 0, Math.Min(bigIntegerArray.Length, ivec.Length));
                     Array.Reverse(ivec);
                     Array.Clear(bigIntegerArray, 0, bigIntegerArray.Length);
                 }
-                output[i] = (byte)(input[i] ^ ecountBuf[number]);
+                output[i] = (byte)(buffer[i] ^ ecountBuf[number]);
                 number = (number + 1) % 16;
             }
-            num = number;
             return output;
         }
-        private byte[] AesCtr128Decrypt(in byte[] input, ref byte[] ivdc, ref byte[] dcountBuf, ref uint num)
+        private byte[] AesCtr128Decrypt(in byte[] buffer, in int length, ref byte[] ivdc, ref byte[] dcountBuf, ref uint number)
         {
-            if (_decryptKey == null)
-            {
-                return null;
-            }
-
-            var output = new byte[input.Length];
-            uint number = num;
-
-            for (uint i = 0; i < input.Length; i++)
+            var output = new byte[length];
+            for (int i = 0; i < length; i++)
             {
                 if (number == 0)
                 {
-                    var ecountBuffer = _cryptoTransformDecrypt.TransformFinalBlock(ivdc, 0, ivdc.Length);
-                    Buffer.BlockCopy(ecountBuffer, 0, dcountBuf, 0, dcountBuf.Length);
-                    Array.Clear(ecountBuffer, 0, ecountBuffer.Length);
+                    dcountBuf = _cryptoTransformDecrypt.TransformFinalBlock(ivdc, 0, ivdc.Length);
                     Array.Reverse(ivdc);
                     var bigInteger = new BigInteger(ArrayUtils.Combine(ivdc, new byte[] { 0x00 }));
                     bigInteger++;
                     var bigIntegerArray = bigInteger.ToByteArray();
-                    ivdc = new byte[16];
                     Buffer.BlockCopy(bigIntegerArray, 0, ivdc, 0, Math.Min(bigIntegerArray.Length, ivdc.Length));
                     Array.Reverse(ivdc);
                     Array.Clear(bigIntegerArray, 0, bigIntegerArray.Length);
                 }
-                output[i] = (byte)(input[i] ^ dcountBuf[number]);
+                output[i] = (byte)(buffer[i] ^ dcountBuf[number]);
                 number = (number + 1) % 16;
             }
-            num = number;
             return output;
         }
         public void Clear()

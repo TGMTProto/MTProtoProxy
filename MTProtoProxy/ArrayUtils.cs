@@ -5,6 +5,11 @@ namespace MTProtoProxy
 {
     internal static class ArrayUtils
     {
+        private static readonly Random Random = new Random();
+        public static void GenerateRandomBytes(in byte[] buffer)
+        {
+            Random.NextBytes(buffer);
+        }
         public static T[] SubArray<T>(this T[] data, int index, int length)
         {
             var result = new T[length];
